@@ -1,0 +1,91 @@
+{
+  "name": "Vernacure Voice Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-process",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-voice",
+      "name": "Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        250,
+        300
+      ],
+      "typeVersion": 2.1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are Vernacure's voice insurance assistant. Users speak to you about insurance needs.\\n\\nYour role:\\n1. Understand user's insurance queries (any language)\\n2. Provide helpful insurance guidance\\n3. ALWAYS respond in the SAME language the user used\\n4. Be conversational and friendly\\n5. Keep responses under 150 words (for voice readability)\\n\\nSupported languages: English, Tamil (தமிழ்), Hindi (हिन्दी), Telugu (తెలుగు), Kannada (ಕನ್ನಡ), Malayalam (മലയാളം)\\n\\nIf user asks about:\\n- Policy comparison: Explain factors to consider\\n- Claims: Guide through process\\n- Coverage: Explain what's included/excluded\\n- Premiums: Explain payment options\"\n    },\n    {\n      \"role\": \"user\", \n      \"content\": \"{{ $json.body.query || $json.body.text || $json.body.audio }}. User's preferred language code: {{ $json.body.language || 'en' }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 400\n}",
+        "options": {}
+      },
+      "id": "groq-llm",
+      "name": "Groq LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        500,
+        300
+      ],
+      "typeVersion": 4.3,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "04PJinm79O7Wa6bL",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"response\": $json.choices[0].message.content, \"transcription\": $('Voice Webhook').first().json.body.query || $('Voice Webhook').first().json.body.text || '', \"language\": $('Voice Webhook').first().json.body.language || 'en', \"success\": true } }}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        750,
+        300
+      ],
+      "typeVersion": 1.5
+    }
+  ],
+  "connections": {
+    "Voice Webhook": {
+      "main": [
+        [
+          {
+            "node": "Groq LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq LLM": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

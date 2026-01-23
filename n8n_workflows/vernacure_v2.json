@@ -1,0 +1,327 @@
+{
+    "name": "Vernacure Voice Pipeline V2",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "vernacure-ai",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "main-webhook",
+            "name": "Main Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "position": [
+                200,
+                400
+            ],
+            "typeVersion": 2.1
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a language and intent analyzer. Analyze the user's message and return JSON.\\n\\nDetect:\\n1. Language: en (English), ta (Tamil), hi (Hindi), te (Telugu), kn (Kannada), ml (Malayalam)\\n2. Intent: greeting, compare, claim, policy_info, general\\n3. Entities: Extract policy types, coverage amounts, family details if mentioned\\n\\nReturn ONLY this JSON structure:\\n{\\n  \\\"detected_language\\\": \\\"en\\\",\\n  \\\"intent\\\": \\\"general\\\",\\n  \\\"entities\\\": {},\\n  \\\"original_text\\\": \\\"user message here\\\"\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body?.query ?? $json.query ?? '' }}\"\n    }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 200\n}",
+                "options": {}
+            },
+            "id": "detect-language-intent",
+            "name": "Detect Language & Intent",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [
+                450,
+                400
+            ],
+            "typeVersion": 4.3,
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "04PJinm79O7Wa6bL",
+                    "name": "Header Auth account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Parse the detection result\nconst detectionResult = JSON.parse($json.choices[0].message.content);\nconst originalQuery = $('Main Webhook').first().json.body?.query ?? $('Main Webhook').first().json.query ?? '';\nconst action = $('Main Webhook').first().json.body?.action ?? $('Main Webhook').first().json.action ?? 'voice';\nconst policies = $('Main Webhook').first().json.body?.policies ?? $('Main Webhook').first().json.policies ?? [];\nconst hasPolicies = Array.isArray(policies) && policies.length > 0;\n\nreturn {\n  json: {\n    detected_language: detectionResult.detected_language || 'en',\n    intent: detectionResult.intent || 'general',\n    entities: detectionResult.entities || {},\n    original_query: originalQuery,\n    action: action,\n    has_policies: hasPolicies\n  }\n};"
+            },
+            "id": "parse-detection",
+            "name": "Parse Detection",
+            "type": "n8n-nodes-base.code",
+            "position": [
+                700,
+                400
+            ],
+            "typeVersion": 2
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.action }}",
+                            "value2": "compare",
+                            "operation": "equals"
+                        }
+                    ],
+                    "boolean": [
+                        {
+                            "value1": "={{ $json.has_policies }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "is-compare-action",
+            "name": "Is Compare Action?",
+            "type": "n8n-nodes-base.if",
+            "position": [
+                950,
+                300
+            ],
+            "typeVersion": 2
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.intent }}",
+                            "value2": "greeting",
+                            "operation": "equals"
+                        }
+                    ]
+                }
+            },
+            "id": "is-greeting",
+            "name": "Is Greeting?",
+            "type": "n8n-nodes-base.if",
+            "position": [
+                950,
+                500
+            ],
+            "typeVersion": 2
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ { \"model\": \"llama-3.3-70b-versatile\", \"response_format\": { \"type\": \"json_object\" }, \"messages\": [ { \"role\": \"system\", \"content\": \"You are an AI insurance advisor. Compare policies and recommend the best one.\\n\\nCRITICAL: Output ONLY valid JSON with this EXACT structure:\\n{\\n  \\\"recommended_index\\\": 0,\\n  \\\"explanation\\\": \\\"Brief explanation\\\",\\n  \\\"scores\\\": [85, 92]\\n}\\n\\nRules:\\n- recommended_index is 0-based\\n- explanation under 150 words\\n- scores is array of numbers 0-100\\n- NO markdown, ONLY raw JSON\\n- Respond in: \" + $json.detected_language }, { \"role\": \"user\", \"content\": \"Compare these policies: \" + JSON.stringify($('Main Webhook').first().json.body?.policies ?? $('Main Webhook').first().json.policies ?? []) } ], \"temperature\": 0.2, \"max_tokens\": 500 } }}",
+                "options": {}
+            },
+            "id": "groq-compare",
+            "name": "Policy Comparison",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [
+                1200,
+                200
+            ],
+            "typeVersion": 4.3,
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "04PJinm79O7Wa6bL",
+                    "name": "Header Auth account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Generate a friendly greeting in the detected language\nconst lang = $json.detected_language || 'en';\nconst greetings = {\n  'en': 'Hello! I\\'m your insurance assistant. How can I help you today? You can ask me about health insurance, compare policies, or get help with claims.',\n  'hi': 'नमस्ते! मैं आपका बीमा सहायक हूं। मैं आज आपकी कैसे मदद कर सकता हूं? आप मुझसे स्वास्थ्य बीमा के बारे में पूछ सकते हैं, पॉलिसियों की तुलना कर सकते हैं, या दावों में मदद ले सकते हैं।',\n  'ta': 'வணக்கம்! நான் உங்கள் காப்பீட்டு உதவியாளர். இன்று நான் உங்களுக்கு எப்படி உதவ முடியும்? சுகாதார காப்பீடு பற்றி கேளுங்கள், பாலிசிகளை ஒப்பிடுங்கள்.',\n  'te': 'నమస్కారం! నేను మీ బీమా సహాయకుడిని. ఈ రోజు నేను మీకు ఎలా సహాయం చేయగలను?',\n  'kn': 'ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ವಿಮಾ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?',\n  'ml': 'നമസ്കാരം! ഞാൻ നിങ്ങളുടെ ഇൻഷുറൻസ് അസിസ്റ്റന്റാണ്. ഇന്ന് എനിക്ക് നിങ്ങളെ എങ്ങനെ സഹായിക്കാനാകും?'\n};\n\nreturn {\n  json: {\n    response: greetings[lang] || greetings['en'],\n    detected_language: lang,\n    intent: 'greeting'\n  }\n};"
+            },
+            "id": "greeting-response",
+            "name": "Greeting Response",
+            "type": "n8n-nodes-base.code",
+            "position": [
+                1200,
+                400
+            ],
+            "typeVersion": 2
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are Vernacure's expert insurance advisor. Help users understand insurance.\\n\\nKnowledge Base:\\n- Premium: Regular payment for coverage\\n- Coverage: Maximum payout by insurer\\n- Claim: Payout request after covered event\\n- Deductible: Amount paid before insurer pays\\n- No-Claim Bonus: Discount for claim-free years\\n\\nPolicy Types:\\n1. Term Insurance: Pure life cover\\n2. Health Insurance: Medical expenses\\n3. Whole Life: Lifetime coverage\\n4. ULIP: Insurance + investment\\n\\nRules:\\n- Be conversational and friendly\\n- Keep responses under 150 words (for voice)\\n- Respond in the SAME language as the user\\n- Language code: {{ $json.detected_language }}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.original_query }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 400\n}",
+                "options": {}
+            },
+            "id": "groq-rag",
+            "name": "RAG Response",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [
+                1200,
+                600
+            ],
+            "typeVersion": 4.3,
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "04PJinm79O7Wa6bL",
+                    "name": "Header Auth account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ { \"recommendation\": $json.choices[0].message.content, \"action\": \"compare\", \"detected_language\": $('Parse Detection').first().json.detected_language, \"intent\": \"compare\", \"success\": true } }}",
+                "options": {}
+            },
+            "id": "compare-response",
+            "name": "Compare Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "position": [
+                1450,
+                200
+            ],
+            "typeVersion": 1.5
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ { \"response\": $json.response, \"detected_language\": $json.detected_language, \"intent\": $json.intent, \"success\": true } }}",
+                "options": {}
+            },
+            "id": "greeting-webhook-response",
+            "name": "Greeting Webhook Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "position": [
+                1450,
+                400
+            ],
+            "typeVersion": 1.5
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ { \"response\": $json.choices[0].message.content, \"detected_language\": $('Parse Detection').first().json.detected_language, \"intent\": $('Parse Detection').first().json.intent, \"success\": true, \"version\": \"v2\" } }}",
+                "options": {}
+            },
+            "id": "rag-webhook-response",
+            "name": "RAG Webhook Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "position": [
+                1450,
+                600
+            ],
+            "typeVersion": 1.5
+        }
+    ],
+    "connections": {
+        "Main Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Detect Language & Intent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Detect Language & Intent": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Detection",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Detection": {
+            "main": [
+                [
+                    {
+                        "node": "Is Compare Action?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is Compare Action?": {
+            "main": [
+                [
+                    {
+                        "node": "Policy Comparison",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Is Greeting?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Is Greeting?": {
+            "main": [
+                [
+                    {
+                        "node": "Greeting Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "RAG Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Policy Comparison": {
+            "main": [
+                [
+                    {
+                        "node": "Compare Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Greeting Response": {
+            "main": [
+                [
+                    {
+                        "node": "Greeting Webhook Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RAG Response": {
+            "main": [
+                [
+                    {
+                        "node": "RAG Webhook Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": true,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "tags": []
+}
