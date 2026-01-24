@@ -1,11 +1,14 @@
-/// Purchase Screen - AVAX Blockchain Payment
+/// Purchase Screen - AVAX Blockchain Payment with IPFS Storage
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:vernacure/config/theme.dart';
 import 'package:vernacure/config/avax_config.dart';
+import 'package:vernacure/config/constants.dart';
 import 'package:vernacure/models/policy.dart';
+import 'package:vernacure/services/pinata_service.dart';
 
 class PurchaseScreen extends StatefulWidget {
   final InsurancePolicy policy;
@@ -21,8 +24,11 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   bool _isConnected = false;
   bool _isProcessing = false;
   bool _isSuccess = false;
+  bool _isPinningToIpfs = false;
   String _walletAddress = '';
   String _txHash = '';
+  String? _ipfsCid;
+  String? _ipfsError;
 
   @override
   Widget build(BuildContext context) {
@@ -183,6 +189,8 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         const SizedBox(height: 8),
         const Text('Your insurance is now active on blockchain', style: TextStyle(color: Colors.grey)),
         const SizedBox(height: 20),
+        
+        // Transaction Details
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: AppTheme.surfaceLight, borderRadius: BorderRadius.circular(8)),
@@ -193,11 +201,85 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             Text('Tx: ${_txHash.substring(0, 20)}...', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
           ]),
         ),
+        
+        // IPFS Storage Status
+        const SizedBox(height: 16),
+        if (_isPinningToIpfs)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 8),
+              Text('Storing on IPFS...', style: TextStyle(color: Colors.grey.shade600)),
+            ],
+          )
+        else if (_ipfsCid != null)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.purple.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.purple.shade200),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.cloud_done, color: Colors.purple.shade600, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Stored on IPFS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple.shade700)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: _ipfsCid!));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('IPFS CID copied!'), duration: Duration(seconds: 2)),
+                    );
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'CID: ${_ipfsCid!.substring(0, 12)}...${_ipfsCid!.substring(_ipfsCid!.length - 6)}',
+                        style: TextStyle(fontSize: 12, color: Colors.purple.shade600),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.copy, size: 14, color: Colors.purple.shade400),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (_ipfsError != null)
+          Container(
+            padding: const EdgeInsets.all(8),
+            child: Text('IPFS: $_ipfsError', style: TextStyle(fontSize: 12, color: Colors.orange.shade700)),
+          ),
+        
         const SizedBox(height: 20),
-        TextButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.open_in_new),
-          label: const Text('View on Snowtrace'),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('View on Snowtrace'),
+            ),
+            if (_ipfsCid != null)
+              TextButton.icon(
+                onPressed: () {
+                  // Open IPFS gateway URL
+                  final url = PinataService.getIpfsUrl(_ipfsCid!);
+                  debugPrint('📌 IPFS URL: $url');
+                },
+                icon: const Icon(Icons.storage),
+                label: const Text('View on IPFS'),
+              ),
+          ],
         ),
       ]),
     ).animate().fadeIn().scale(begin: const Offset(0.9, 0.9));
@@ -211,17 +293,53 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     });
   }
 
-  void _confirmPurchase() {
+  Future<void> _confirmPurchase() async {
     setState(() => _isProcessing = true);
-    Future.delayed(const Duration(seconds: 3), () {
+    
+    // Simulate blockchain transaction
+    await Future.delayed(const Duration(seconds: 2));
+    
+    if (!mounted) return;
+    
+    final txHash = '0x${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}abc123def456789';
+    
+    setState(() {
+      _isProcessing = false;
+      _isSuccess = true;
+      _txHash = txHash;
+      _isPinningToIpfs = true;
+    });
+    
+    // Pin transaction data to IPFS
+    try {
+      final ipfsCid = await PinataService.pinTransactionData(
+        policyName: widget.policy.name,
+        policyId: widget.policy.id,
+        insurer: widget.policy.insurer,
+        premiumAmount: 0.05, // AVAX amount
+        currency: 'AVAX',
+        walletAddress: _walletAddress,
+        transactionHash: txHash,
+        networkName: 'Avalanche Fuji Testnet',
+      );
+      
       if (mounted) {
         setState(() {
-          _isProcessing = false;
-          _isSuccess = true;
-          _txHash = '0xabc123def456789ghijklmnop123456789xyz';
+          _isPinningToIpfs = false;
+          _ipfsCid = ipfsCid;
+          if (ipfsCid == null) {
+            _ipfsError = 'Could not store on IPFS';
+          }
         });
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isPinningToIpfs = false;
+          _ipfsError = 'IPFS error: ${e.toString().substring(0, 30)}';
+        });
+      }
+    }
   }
 }
 

@@ -26,6 +26,8 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
   bool _isSpeaking = false;
   String _transcribedText = '';
   String _currentLanguage = 'en';
+  String _lastDetectedLanguage = 'en';
+  bool _languageDetected = false; // Track if language was detected in session
   late AnimationController _pulseController;
   
   // Speech-to-Text
@@ -45,6 +47,16 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
     'te': 'te_IN',
     'kn': 'kn_IN',
     'ml': 'ml_IN',
+  };
+
+  // TTS locale codes (may differ from STT)
+  static const Map<String, String> _ttsLocales = {
+    'en': 'en-IN',
+    'ta': 'ta-IN',
+    'hi': 'hi-IN',
+    'te': 'te-IN',
+    'kn': 'kn-IN',
+    'ml': 'ml-IN',
   };
 
   @override
@@ -83,8 +95,11 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
 
   Future<void> _initTTS() async {
     try {
-      await _tts.setLanguage(_sttLocales[_currentLanguage] ?? 'en_IN');
-      await _tts.setSpeechRate(0.5);
+      // Configure TTS for current language
+      await _setTTSLanguage(_currentLanguage);
+      
+      // Increased speed for better user experience (0.5 -> 0.65)
+      await _tts.setSpeechRate(0.65);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
       
@@ -101,9 +116,63 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
         setState(() => _isSpeaking = false);
       });
       
+      // Log available languages for debugging
+      final languages = await _tts.getLanguages;
+      debugPrint('🔊 Available TTS languages: $languages');
       debugPrint('🔊 TTS initialized for language: $_currentLanguage');
     } catch (e) {
       debugPrint('🔊 TTS init error: $e');
+    }
+  }
+
+  /// Set TTS language with fallback handling
+  Future<void> _setTTSLanguage(String langCode) async {
+    final ttsLocale = _ttsLocales[langCode] ?? 'en-IN';
+    
+    try {
+      // Check available languages first
+      final availableLanguages = await _tts.getLanguages as List<dynamic>?;
+      final availableList = availableLanguages?.map((e) => e.toString().toLowerCase()).toList() ?? [];
+      
+      debugPrint('🔊 Checking for: $ttsLocale in available: ${availableList.take(10)}...');
+      
+      // Try the specific locale first
+      if (availableList.any((l) => l.contains(ttsLocale.toLowerCase()) || l.contains(langCode))) {
+        final result = await _tts.setLanguage(ttsLocale);
+        if (result == 1) {
+          debugPrint('🔊 TTS language set to: $ttsLocale');
+          return;
+        }
+      }
+      
+      // For web: Check if we have Indian English at least
+      final hasEnglish = availableList.any((l) => l.contains('en'));
+      if (hasEnglish) {
+        // Try en-IN first, then en-US
+        var result = await _tts.setLanguage('en-IN');
+        if (result != 1) {
+          result = await _tts.setLanguage('en-US');
+        }
+        if (result == 1) {
+          debugPrint('🔊 TTS using English voice (Indian lang not available on web)');
+          return;
+        }
+      }
+      
+      // Last resort: use whatever is available
+      if (availableList.isNotEmpty) {
+        final firstAvailable = availableLanguages!.first.toString();
+        await _tts.setLanguage(firstAvailable);
+        debugPrint('🔊 TTS using first available: $firstAvailable');
+        return;
+      }
+      
+      debugPrint('🔊 No TTS voices available!');
+    } catch (e) {
+      debugPrint('🔊 TTS setLanguage error: $e');
+      try {
+        await _tts.setLanguage('en-US');
+      } catch (_) {}
     }
   }
 
@@ -165,12 +234,25 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
                     color: AppTheme.primaryBlue,
                   ),
                 ),
-                Text(
-                  'Speaking in $_languageName',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade600,
-                  ),
+                Row(
+                  children: [
+                    Icon(
+                      _languageDetected ? Icons.check_circle : Icons.auto_awesome,
+                      size: 14,
+                      color: _languageDetected ? AppTheme.successGreen : Colors.orange,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _languageDetected 
+                          ? 'Speaking in $_languageName'
+                          : 'Auto-detecting language...',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _languageDetected ? AppTheme.successGreen : Colors.orange,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -185,11 +267,6 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
               ),
               child: Icon(Icons.volume_up_rounded, color: AppTheme.accentGold, size: 20),
             ).animate(onPlay: (c) => c.repeat()).fadeIn().then().fadeOut(),
-          IconButton(
-            onPressed: _changeLanguage,
-            icon: const Icon(Icons.language_rounded),
-            color: AppTheme.primaryBlue,
-          ),
         ],
       ),
     )
@@ -502,11 +579,14 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
       await _speech.stop();
       setState(() => _isListening = false);
       
-      // Process the transcribed text if we have any
-      if (_transcribedText.isNotEmpty) {
+      // Process the transcribed text if we have any meaningful content
+      // Require at least 2 characters to avoid noise
+      if (_transcribedText.trim().length >= 2) {
         await _processQuery(_transcribedText);
-        _transcribedText = '';
+      } else {
+        debugPrint('🎤 Ignored - transcription too short: "$_transcribedText"');
       }
+      _transcribedText = '';
     } else {
       // Start listening
       if (!_speechAvailable) {
@@ -517,6 +597,9 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
         return;
       }
       
+      // Clear any previous state
+      _transcribedText = '';
+      
       setState(() {
         _isListening = true;
         _transcribedText = '';
@@ -525,29 +608,48 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
       final locale = _sttLocales[_currentLanguage] ?? 'en_IN';
       debugPrint('🎤 Starting listening with locale: $locale');
       
-      await _speech.listen(
-        localeId: locale,
-        onResult: (result) {
-          setState(() {
-            _transcribedText = result.recognizedWords;
-          });
-          debugPrint('🎤 Recognized: ${result.recognizedWords}');
-          
-          // Only auto-stop if we have a valid final result
-          if (result.finalResult) {
-            _speech.stop();
-            setState(() => _isListening = false);
+      try {
+        await _speech.listen(
+          localeId: locale,
+          onResult: (result) {
+            debugPrint('🎤 Recognized: "${result.recognizedWords}" (final: ${result.finalResult})');
             
-            if (_transcribedText.isNotEmpty) {
-              _processQuery(_transcribedText);
+            setState(() {
+              _transcribedText = result.recognizedWords;
+            });
+            
+            // Only auto-stop if we have a valid final result with actual content
+            if (result.finalResult) {
+              _speech.stop();
+              setState(() => _isListening = false);
+              
+              // Require minimum length to avoid false recognitions
+              if (_transcribedText.trim().length >= 2) {
+                _processQuery(_transcribedText);
+              } else {
+                debugPrint('🎤 Ignored short final result: "$_transcribedText"');
+              }
+              _transcribedText = '';
             }
-            _transcribedText = '';
-          }
-        },
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
-        partialResults: true,
-      );
+          },
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 3),
+          partialResults: true,
+          cancelOnError: true,
+          listenMode: stt.ListenMode.dictation,
+        );
+      } catch (e) {
+        debugPrint('🎤 Listen error: $e');
+        setState(() {
+          _isListening = false;
+          _transcribedText = '';
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Voice recognition error: $e')),
+          );
+        }
+      }
     }
   }
 
@@ -575,14 +677,55 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
       final responseText = result['response'] as String? ?? 
           'I received your message. How can I help with insurance?';
       final detectedLanguage = result['detected_language'] as String? ?? _currentLanguage;
-      final intent = result['intent'] as String? ?? 'general';
+      var intent = result['intent'] as String? ?? 'general';
+      
+      // Fix: UI-side fix - Override compare intent if response indicates no policies
+      // Don't show compare UI unless there are actual policies
+      if (intent.toLowerCase() == 'compare' && 
+          responseText.toLowerCase().contains('no policies')) {
+        intent = 'general';
+        debugPrint('🎤 UI Fix: Overriding compare intent to general (no policies in response)');
+      }
       
       debugPrint('🎤 Detected language: $detectedLanguage, Intent: $intent');
 
       if (mounted) {
+        // Show language detection popup if this is first detection or language changed
+        final bool isNewLanguage = detectedLanguage != _lastDetectedLanguage || !_languageDetected;
+        
+        if (isNewLanguage) {
+          final langInfo = AppConstants.supportedLanguages.firstWhere(
+            (l) => l['code'] == detectedLanguage,
+            orElse: () => {'name': 'English', 'native': 'English', 'code': 'en'},
+          );
+          
+          // Show popup notification
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.language, color: Colors.white, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    '🌐 Language Detected: ${langInfo['native']} (${langInfo['name']})',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              backgroundColor: AppTheme.primaryBlue,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              margin: const EdgeInsets.all(16),
+            ),
+          );
+        }
+        
         // Update current language based on detection
         setState(() {
           _currentLanguage = detectedLanguage;
+          _lastDetectedLanguage = detectedLanguage;
+          _languageDetected = true;
           _conversation.add({
             'role': 'assistant',
             'text': responseText,
@@ -614,55 +757,26 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
   Future<void> _speakText(String text, [String? language]) async {
     try {
       final targetLang = language ?? _currentLanguage;
-      await _tts.setLanguage(_sttLocales[targetLang] ?? 'en_IN');
+      
+      // Set proper TTS language before speaking
+      await _setTTSLanguage(targetLang);
+      
+      // Language-specific speech rates - English is slower, Indian languages are faster
+      final speechRate = (targetLang == 'en') ? 0.45 : 0.65;
+      await _tts.setSpeechRate(speechRate);
+      
+      debugPrint('🔊 Speaking in $targetLang (rate: $speechRate): ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
       await _tts.speak(text);
     } catch (e) {
       debugPrint('🔊 TTS speak error: $e');
+      // Try speaking in English as fallback
+      try {
+        await _tts.setLanguage('en-IN');
+        await _tts.setSpeechRate(0.45);
+        await _tts.speak(text);
+      } catch (_) {
+        debugPrint('🔊 TTS fallback also failed');
+      }
     }
-  }
-
-  void _changeLanguage() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Select Language',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...AppConstants.supportedLanguages.map((lang) {
-                return ListTile(
-                  title: Text(lang['native']!),
-                  subtitle: Text(lang['name']!),
-                  trailing: _currentLanguage == lang['code']
-                      ? const Icon(Icons.check_circle, color: AppTheme.successGreen)
-                      : null,
-                  onTap: () async {
-                    Navigator.pop(context);
-                    setState(() {
-                      _currentLanguage = lang['code']!;
-                    });
-                    // Update TTS language
-                    await _tts.setLanguage(_sttLocales[_currentLanguage] ?? 'en_IN');
-                    debugPrint('🎤 Language changed to: $_currentLanguage');
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
-    );
   }
 }

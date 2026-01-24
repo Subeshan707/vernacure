@@ -16,8 +16,6 @@ class WelcomeScreen extends StatefulWidget {
 }
 
 class _WelcomeScreenState extends State<WelcomeScreen> {
-  String _selectedLanguage = 'en';
-
   @override
   void initState() {
     super.initState();
@@ -133,53 +131,50 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Widget _buildLanguageSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Select Your Language',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
+    // Language is now auto-detected - show info badge instead
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
           ),
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: AppConstants.supportedLanguages.map((lang) {
-            final isSelected = _selectedLanguage == lang['code'];
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedLanguage = lang['code']!;
-                });
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.white : Colors.white.withValues(alpha:  0.15),
-                  borderRadius: BorderRadius.circular(25),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.accentGold : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-                child: Text(
-                  lang['native']!,
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Auto Language Detection',
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected ? AppTheme.primaryBlue : Colors.white,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
+                SizedBox(height: 4),
+                Text(
+                  'Speaks in Tamil, Hindi, Telugu, Kannada, Malayalam & English',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -276,12 +271,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   void _navigateToHome({required bool startWithVoice}) {
-    debugPrint('🚀 [WelcomeScreen] Navigating to HomeScreen');
-    debugPrint('🚀 [WelcomeScreen] Language: $_selectedLanguage, startWithVoice: $startWithVoice');
+    debugPrint('🚀 [WelcomeScreen] Navigating to HomeScreen (auto-detect language)');
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => HomeScreen(
-          selectedLanguage: _selectedLanguage,
+          selectedLanguage: 'en', // Default - actual language is auto-detected
           startWithVoice: startWithVoice,
         ),
       ),

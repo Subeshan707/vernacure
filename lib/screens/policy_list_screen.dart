@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:vernacure/config/theme.dart';
 import 'package:vernacure/models/policy.dart';
 import 'package:vernacure/screens/policy_comparison_screen.dart';
+import 'package:vernacure/screens/policy_detail_screen.dart';
 import 'package:vernacure/widgets/policy_card.dart';
 
 class PolicyListScreen extends StatefulWidget {
@@ -20,7 +21,10 @@ class PolicyListScreen extends StatefulWidget {
 
 class _PolicyListScreenState extends State<PolicyListScreen> {
   String _selectedCategory = 'All';
-  final List<String> _categories = ['All', 'Individual', 'Family', 'Senior Citizen', 'Budget'];
+  String _searchQuery = '';
+  final List<String> _categories = [
+    'All', 'Individual', 'Family', 'Senior Citizen', 'Child', 'Women',
+  ];
   final List<InsurancePolicy> _policies = SamplePolicies.policies
       .map((json) => InsurancePolicy.fromJson(json))
       .toList();
@@ -30,9 +34,18 @@ class _PolicyListScreenState extends State<PolicyListScreen> {
   @override
   Widget build(BuildContext context) {
     debugPrint('📄 [PolicyListScreen] build() called - Language: ${widget.language}');
-    final filteredPolicies = _selectedCategory == 'All'
+    var filteredPolicies = _selectedCategory == 'All'
         ? _policies
         : _policies.where((p) => p.category == _selectedCategory).toList();
+    
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      filteredPolicies = filteredPolicies.where((p) =>
+        p.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+        p.insurer.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+        p.type.toLowerCase().contains(_searchQuery.toLowerCase())
+      ).toList();
+    }
     debugPrint('📄 [PolicyListScreen] Showing ${filteredPolicies.length} policies in category: $_selectedCategory');
 
     return Scaffold(
@@ -113,11 +126,26 @@ class _PolicyListScreenState extends State<PolicyListScreen> {
               ],
             ),
             child: TextField(
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
               decoration: InputDecoration(
-                hintText: 'Search policies...',
+                hintText: 'Search policies, insurers...',
                 hintStyle: TextStyle(color: Colors.grey.shade400),
                 border: InputBorder.none,
                 prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
               ),
             ),
           ),
@@ -210,7 +238,15 @@ class _PolicyListScreenState extends State<PolicyListScreen> {
               });
             },
             onTap: () {
-              // Navigate to policy detail
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PolicyDetailScreen(
+                    policy: policy,
+                    language: widget.language,
+                  ),
+                ),
+              );
             },
           )
               .animate()
