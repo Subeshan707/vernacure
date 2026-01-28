@@ -48,6 +48,17 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
     'kn': 'kn_IN',
     'ml': 'ml_IN',
   };
+  
+  // Priority order for STT multi-language detection (first message)
+  // We try multiple locales to better detect the user's language
+  static const List<String> _multiLangLocales = [
+    'ta_IN', // Tamil first (common in South India)
+    'hi_IN', // Hindi (most widely spoken)
+    'te_IN', // Telugu
+    'kn_IN', // Kannada
+    'ml_IN', // Malayalam
+    'en_IN', // English fallback
+  ];
 
   // TTS locale codes (may differ from STT)
   static const Map<String, String> _ttsLocales = {
@@ -605,8 +616,28 @@ class _VoiceChatScreenState extends State<VoiceChatScreen>
         _transcribedText = '';
       });
       
-      final locale = _sttLocales[_currentLanguage] ?? 'en_IN';
-      debugPrint('🎤 Starting listening with locale: $locale');
+      // Use detected language if we have one, otherwise use the best available locale
+      String locale;
+      if (_languageDetected && _sttLocales.containsKey(_currentLanguage)) {
+        // Use the detected language for subsequent queries
+        locale = _sttLocales[_currentLanguage]!;
+        debugPrint('🎤 Using detected language locale: $locale');
+      } else {
+        // First time: Find the best available locale from our priority list
+        final availableLocales = await _speech.locales();
+        final availableIds = availableLocales.map((l) => l.localeId).toSet();
+        
+        // Find first available locale from our priority list
+        locale = 'en_IN'; // default
+        for (final preferred in _multiLangLocales) {
+          if (availableIds.contains(preferred)) {
+            locale = preferred;
+            break;
+          }
+        }
+        debugPrint('🎤 First listen - using best available locale: $locale');
+        debugPrint('🎤 Available locales: ${availableIds.take(10)}...');
+      }
       
       try {
         await _speech.listen(
