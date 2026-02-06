@@ -6,7 +6,7 @@
 [![Groq](https://img.shields.io/badge/AI-Groq%20LLaMA%203.1-00D4AA)](https://groq.com)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-> ** AI IGNITE 2026 Hackathon** | PS 6: Multilingual InsurTech Platform
+> AI IGNITE 2026 Hackathon | PS 6: Multilingual InsurTech Platform
 >
 > *India's First Large-Scale Agentic AI Hackathon*
 
